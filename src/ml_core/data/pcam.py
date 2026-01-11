@@ -19,10 +19,7 @@ class PCAMDataset(Dataset):
 
         # TODO: Initialize dataset
         if not self . x_path . exists () or not self . y_path . exists ():
-            raise FileNotFoundError (
-            f" PCAM files not found at { self . x_path } or { self . y_path }
-            "   
-            )
+            raise FileNotFoundError (f" PCAM files not found at { self . x_path } or { self . y_path }")
 
         # 2. Open h5 files in read mode
         self . x_data = h5py . File ( self .x_path , "r")["x"]
