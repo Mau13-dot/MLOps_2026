@@ -42,14 +42,12 @@ class PCAMDataset(Dataset):
                 f"PCAM files not found at {self.x_path} or {self.y_path}"
             )
 
-        # Lazy H5 handles (opened in _ensure_open)
         self._x_h5: Optional[h5py.File] = None
         self._y_h5: Optional[h5py.File] = None
         self.x_data = None
         self.y_data = None
         self._n: Optional[int] = None
 
-        # Indices after optional filtering (computed lazily)
         self._indices: Optional[np.ndarray] = None
 
     def _ensure_open(self) -> None:
@@ -67,22 +65,19 @@ class PCAMDataset(Dataset):
 
         assert self._n is not None
 
-        # No filtering: identity mapping
         if not self.filter_data:
             self._indices = np.arange(self._n, dtype=np.int64)
             return
 
-        # Filtering: drop near-black / near-white outliers by mean intensity
         keep_chunks = []
         for start in range(0, self._n, self.chunk_size):
             end = min(start + self.chunk_size, self._n)
 
-            x = np.asarray(self.x_data[start:end])  # (B,H,W,C) for the chunk
+            x = np.asarray(self.x_data[start:end])  
 
-            # Clip BEFORE any uint8 conversion and BEFORE computing mean
             x = np.clip(x, 0, 255).astype(np.uint8)
 
-            means = x.mean(axis=(1, 2, 3))  # mean intensity per sample
+            means = x.mean(axis=(1, 2, 3)) 
             mask = (means > self.mean_low) & (means < self.mean_high)
 
             idxs = np.nonzero(mask)[0] + start
@@ -108,7 +103,6 @@ class PCAMDataset(Dataset):
         image = np.asarray(self.x_data[real_idx])
         label = int(np.asarray(self.y_data[real_idx]).squeeze())
 
-        # REQUIRED by tests: clip before uint8 conversion
         image = np.clip(image, 0, 255).astype(np.uint8)
 
         if self.transform:
@@ -135,7 +129,7 @@ class PCAMDataset(Dataset):
             pass
 
     def __getstate__(self):
-        # DataLoader workers shouldn't pickle open H5 handles
+        
         state = self.__dict__.copy()
         state["_x_h5"] = None
         state["_y_h5"] = None

@@ -34,7 +34,6 @@ def get_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader]:
     val_x_path = base_path / "camelyonpatch_level_2_split_valid_x.h5"
     val_y_path = base_path / "camelyonpatch_level_2_split_valid_y.h5"
 
-    # Optional: allow config to toggle filtering
     filter_data = bool(data_cfg.get("filter_data", False))
 
     train_ds = PCAMDataset(
@@ -47,10 +46,9 @@ def get_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader]:
         str(val_x_path),
         str(val_y_path),
         transform=val_transform,
-        filter_data=False,  # usually don't filter validation
+        filter_data=False,
     )
 
-    # Read labels once from the H5 file
     with h5py.File(str(train_y_path), "r") as f:
         y = np.asarray(f["y"][:]).squeeze().astype(np.int64)
 
@@ -70,7 +68,7 @@ def get_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader]:
     train_loader = DataLoader(
         train_ds,
         batch_size=data_cfg["batch_size"],
-        sampler=sampler,     # sampler replaces shuffle
+        sampler=sampler,  
         shuffle=False,
         num_workers=data_cfg["num_workers"],
     )
