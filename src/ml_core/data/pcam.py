@@ -12,10 +12,11 @@ class PCAMDataset(Dataset):
     PatchCamelyon (PCAM) Dataset reader for H5 format.
 
     Test expectations:
-    - accepts filter_data kwarg
-    - clips values to [0,255] BEFORE uint8 conversion
-    - when filter_data=True, removes black/white outliers using mean intensity
-    - lazy H5 loading
+    - Accepts filter_data kwarg
+    - Clips values to [0,255] BEFORE casting to uint8
+    - Mean-based filtering drops black/white outliers (mean == 0 and mean == 255)
+    - Exposes filtered indices as `ds.indices`
+    - Lazy H5 loading (safe with DataLoader workers)
     """
 
     def __init__(
@@ -24,8 +25,8 @@ class PCAMDataset(Dataset):
         y_path: str,
         transform: Optional[Callable] = None,
         filter_data: bool = False,
-        mean_low: float = 1.0,
-        mean_high: float = 254.0,
+        mean_low: float = 0.0,     
+        mean_high: float = 255.0,  
         chunk_size: int = 1024,
     ):
         self.x_path = Path(x_path)
@@ -44,8 +45,8 @@ class PCAMDataset(Dataset):
 
         self._x_h5: Optional[h5py.File] = None
         self._y_h5: Optional[h5py.File] = None
-        self.x_data = None
-        self.y_data = None
+        self._x_ds = None
+        self._y_ds = None
         self._n: Optional[int] = None
 
         self._indices: Optional[np.ndarray] = None
@@ -54,9 +55,9 @@ class PCAMDataset(Dataset):
         if self._x_h5 is None or self._y_h5 is None:
             self._x_h5 = h5py.File(str(self.x_path), "r")
             self._y_h5 = h5py.File(str(self.y_path), "r")
-            self.x_data = self._x_h5["x"]
-            self.y_data = self._y_h5["y"]
-            self._n = int(len(self.x_data))
+            self._x_ds = self._x_h5["x"]
+            self._y_ds = self._y_h5["y"]
+            self._n = int(len(self._x_ds))
 
     def _ensure_indices(self) -> None:
         self._ensure_open()
@@ -64,31 +65,32 @@ class PCAMDataset(Dataset):
             return
 
         assert self._n is not None
+        assert self._x_ds is not None
 
         if not self.filter_data:
             self._indices = np.arange(self._n, dtype=np.int64)
             return
 
-        keep_chunks = []
+        keep_parts = []
         for start in range(0, self._n, self.chunk_size):
             end = min(start + self.chunk_size, self._n)
-
-            x = np.asarray(self.x_data[start:end])  
+            x = np.asarray(self._x_ds[start:end])
 
             x = np.clip(x, 0, 255).astype(np.uint8)
 
-            means = x.mean(axis=(1, 2, 3)) 
+            means = x.mean(axis=(1, 2, 3))
             mask = (means > self.mean_low) & (means < self.mean_high)
 
             idxs = np.nonzero(mask)[0] + start
-            keep_chunks.append(idxs.astype(np.int64))
+            keep_parts.append(idxs.astype(np.int64))
 
         self._indices = (
-            np.concatenate(keep_chunks) if keep_chunks else np.array([], dtype=np.int64)
+            np.concatenate(keep_parts) if keep_parts else np.array([], dtype=np.int64)
         )
-    
+
+    @property
     def indices(self) -> np.ndarray:
-        """Public access to (filtered) indices — required by the test suite."""
+        """Public access to filtered indices (required by tests)."""
         self._ensure_indices()
         assert self._indices is not None
         return self._indices
@@ -100,32 +102,34 @@ class PCAMDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         self._ensure_indices()
-        assert self._indices is not None
         self._ensure_open()
-        assert self.x_data is not None and self.y_data is not None
+        assert self._indices is not None
+        assert self._x_ds is not None and self._y_ds is not None
 
         real_idx = int(self._indices[idx])
 
-        image = np.asarray(self.x_data[real_idx])
-        label = int(np.asarray(self.y_data[real_idx]).squeeze())
+        image = np.asarray(self._x_ds[real_idx])
+        label = int(np.asarray(self._y_ds[real_idx]).squeeze())
 
         image = np.clip(image, 0, 255).astype(np.uint8)
 
-        if self.transform:
-            image = self.transform(image)
+        if self.transform is not None:
+            image_t = self.transform(image)
+        else:
+            image_t = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
 
-        return image, torch.tensor(label, dtype=torch.long)
+        label_t = torch.tensor(label, dtype=torch.long)
+        return image_t, label_t
 
     def close(self) -> None:
         if self._x_h5 is not None:
             self._x_h5.close()
         if self._y_h5 is not None:
             self._y_h5.close()
-
         self._x_h5 = None
         self._y_h5 = None
-        self.x_data = None
-        self.y_data = None
+        self._x_ds = None
+        self._y_ds = None
         self._n = None
 
     def __del__(self) -> None:
@@ -135,10 +139,9 @@ class PCAMDataset(Dataset):
             pass
 
     def __getstate__(self):
-        
         state = self.__dict__.copy()
         state["_x_h5"] = None
         state["_y_h5"] = None
-        state["x_data"] = None
-        state["y_data"] = None
+        state["_x_ds"] = None
+        state["_y_ds"] = None
         return state
