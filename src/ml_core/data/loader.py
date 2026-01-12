@@ -80,5 +80,7 @@ def get_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader]:
         shuffle=False,
         num_workers=data_cfg["num_workers"],
     )
+    print(hello)
 
     return train_loader, val_loader
+    
